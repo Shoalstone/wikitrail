@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>WikiTrail</title>
+<style>
+  /* dark theme (default) */
+  :root{
+    --bg:#14171c; --bg2:#1b1f27; --bar-fade:rgba(27,31,39,.85);
+    --panel:#1e232c; --panel-soft:rgba(30,35,44,.92);
+    --line:#2c333f; --line2:#3a4554;
+    --text:#e7ecf3; --muted:#9aa6b6;
+    --accent:#4f8cff; --accent2:#3f7bf0; --accent-text:#fff;
+    --input-bg:#11151b; --btn-bg:#222936; --btn-hover:#2a3340;
+    --toast-bg:#0d1015;
+    --danger-border:#5a2730; --danger-text:#ff8a96; --danger-hover:#3a1f25;
+    --unread:#3a82f7; --read:#2fbf71; --temp:#ffb14a;
+    /* canvas */
+    --edge:rgba(150,162,180,.22); --edge-prev:rgba(255,177,74,.45);
+    --node-prev-ring:rgba(255,210,150,.9);
+    --node-hover-ring:rgba(255,255,255,.55); --node-sel-ring:#ffffff;
+    --label-halo:rgba(10,12,16,.9); --label-text:#dfe6f0; --label-prev-text:#ffd9a8;
+    /* panel state chips */
+    --chip-prev-bg:rgba(255,177,74,.18); --chip-prev-text:#ffce93;
+    --chip-read-bg:rgba(47,191,113,.18); --chip-read-text:#7ee2ad;
+    --chip-unread-bg:rgba(58,130,247,.18); --chip-unread-text:#9cc0ff;
+  }
+  /* light theme — follows the browser/OS setting */
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#f5f7fa; --bg2:#ffffff; --bar-fade:rgba(255,255,255,.85);
+      --panel:#ffffff; --panel-soft:rgba(255,255,255,.94);
+      --line:#d8dee8; --line2:#c0c9d6;
+      --text:#1c2330; --muted:#5a6678;
+      --accent:#2f6fe0; --accent2:#2560c8; --accent-text:#ffffff;
+      --input-bg:#ffffff; --btn-bg:#eef1f6; --btn-hover:#e2e7ef;
+      --toast-bg:#ffffff;
+      --danger-border:#e0a0a8; --danger-text:#c0303f; --danger-hover:#fbe9eb;
+      --unread:#2f6fe0; --read:#1ea863; --temp:#e0840a;
+      /* canvas */
+      --edge:rgba(90,102,120,.28); --edge-prev:rgba(224,132,10,.5);
+      --node-prev-ring:rgba(200,130,20,.85);
+      --node-hover-ring:rgba(0,0,0,.45); --node-sel-ring:#1c2330;
+      --label-halo:rgba(255,255,255,.92); --label-text:#1c2330; --label-prev-text:#9a5b00;
+      /* panel state chips */
+      --chip-prev-bg:rgba(224,132,10,.16); --chip-prev-text:#9a5b00;
+      --chip-read-bg:rgba(30,168,99,.16); --chip-read-text:#137a47;
+      --chip-unread-bg:rgba(47,111,224,.14); --chip-unread-text:#2560c8;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
+    color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  #stage{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;cursor:grab}
+  canvas.grabbing{cursor:grabbing}
+
+  /* top bar */
+  #bar{position:fixed;top:0;left:0;right:0;height:54px;display:flex;gap:8px;
+    align-items:center;padding:0 12px;background:linear-gradient(var(--bg2),var(--bar-fade));
+    border-bottom:1px solid var(--line);backdrop-filter:blur(6px);z-index:10}
+  #bar .brand{font-weight:700;letter-spacing:.3px;margin-right:6px;white-space:nowrap}
+  #bar .brand span{color:var(--accent)}
+  .qwrap{position:relative;flex:1;min-width:120px}
+  #q{width:100%;height:34px;padding:0 12px;border-radius:8px;
+    border:1px solid var(--line);background:var(--input-bg);color:var(--text);outline:none}
+  #q:focus{border-color:var(--line2)}
+  #sugg{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:20;display:none;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;
+    box-shadow:0 12px 30px rgba(0,0,0,.4);max-height:320px;overflow-y:auto}
+  #sugg.open{display:block}
+  #sugg .opt{padding:8px 12px;font-size:13px;color:var(--text);cursor:pointer;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #sugg .opt:hover,#sugg .opt.active{background:var(--btn-hover)}
+  button.btn{height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);
+    background:var(--btn-bg);color:var(--text);cursor:pointer;white-space:nowrap}
+  button.btn:hover{background:var(--btn-hover);border-color:var(--line2)}
+  button.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+  button.btn.primary:hover{background:var(--accent2)}
+  .sep{width:1px;height:24px;background:var(--line);margin:0 2px}
+  #count{color:var(--muted);font-size:12px;white-space:nowrap}
+  #count b{color:var(--text)}
+  #dirty{width:9px;height:9px;border-radius:50%;flex:none;background:var(--read);
+    transition:background .2s}
+  #dirty.unsaved{background:var(--temp)}
+
+  /* legend */
+  #legend{position:fixed;left:12px;bottom:12px;z-index:8;background:var(--panel-soft);
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12px;
+    color:var(--muted);max-width:280px}
+  #legend .row{display:flex;align-items:center;gap:8px;margin:3px 0}
+  #legend .dot{width:11px;height:11px;border-radius:50%;flex:none}
+  #legend h4{margin:0 0 6px;color:var(--text);font-size:12px}
+  #legend .keys{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;
+    display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}
+  #legend .keys .k{white-space:nowrap;color:var(--text)}
+  #legend kbd{background:var(--input-bg);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:4px;padding:1px 5px;font:11px ui-monospace,monospace;color:var(--text)}
+  #legend.collapsed .body{display:none}
+  #legend .hd{display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+
+  /* node panel */
+  #panel{position:fixed;top:66px;right:12px;width:300px;z-index:9;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.45);
+    display:none;overflow:hidden}
+  #panel .head{padding:16px 16px 12px;border-bottom:1px solid var(--line)}
+  #panel .title{font-size:16px;font-weight:700;line-height:1.3;word-break:break-word;padding-right:14px}
+  #panel .body{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+  #panel .statline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  #panel .meta{color:var(--muted);font-size:12px}
+  #panel .stchip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;
+    font-weight:600;letter-spacing:.2px}
+  #panel a.link{color:var(--accent);text-decoration:none;font-size:13px}
+  #panel a.link:hover{text-decoration:underline}
+  #panel .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+  #panel button{height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line);
+    background:var(--btn-bg);color:var(--text);cursor:pointer;font-size:13px}
+  #panel button:hover{background:var(--btn-hover)}
+  #panel button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+  #panel button.primary:hover{background:var(--accent2);border-color:var(--accent2)}
+  #panel button.danger{border-color:var(--danger-border);color:var(--danger-text)}
+  #panel button.danger:hover{background:var(--danger-hover)}
+  #panel .x{position:absolute;top:10px;right:12px;cursor:pointer;color:var(--muted);
+    font-size:18px;line-height:1}
+  #panel .x:hover{color:var(--text)}
+
+  /* article list (upper-left) */
+  #list{position:fixed;top:66px;left:12px;width:260px;z-index:8;background:var(--panel-soft);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    box-shadow:0 12px 40px rgba(0,0,0,.35);display:none;backdrop-filter:blur(6px)}
+  #list .hd{display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 12px}
+  #list .hd h4{margin:0;color:var(--text);font-size:12px}
+  #list .hd .cnt{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+  #list .hd .tog{color:var(--muted)}
+  #list .body{border-top:1px solid var(--line)}
+  #list.collapsed .body{display:none}
+  #list .search{padding:8px 10px 6px}
+  #list .search input{width:100%;height:30px;padding:0 10px;border-radius:8px;
+    border:1px solid var(--line);background:var(--input-bg);color:var(--text);outline:none;font-size:13px}
+  #list .search input:focus{border-color:var(--line2)}
+  #list .items{max-height:min(46vh,420px);overflow-y:auto;padding:0 6px 8px}
+  #list .item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;
+    cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden}
+  #list .item:hover{background:var(--btn-hover)}
+  #list .item.sel{background:var(--btn-hover);box-shadow:inset 0 0 0 1px var(--line2)}
+  #list .item .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  #list .item .t{overflow:hidden;text-overflow:ellipsis}
+  #list .empty{padding:8px 10px 10px;color:var(--muted);font-size:12px}
+
+  /* toast + hint */
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:20;
+    background:var(--toast-bg);border:1px solid var(--line);color:var(--text);padding:9px 16px;
+    border-radius:10px;font-size:13px;display:none;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #toast.err{border-color:var(--danger-border);color:var(--danger-text)}
+  #hint{position:fixed;inset:54px 0 0 0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;color:var(--muted);text-align:center;z-index:1}
+  #hint div{max-width:460px;line-height:1.7}
+  #spin{display:none;width:14px;height:14px;border:2px solid var(--line);
+    border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div id="bar">
+  <div class="brand">Wiki<span>Trail</span></div>
+  <div class="qwrap">
+    <input id="q" placeholder="Article name or Wikipedia link…" autocomplete="off" spellcheck="false">
+    <div id="sugg"></div>
+  </div>
+  <div id="spin"></div>
+  <button class="btn primary" id="add">Add</button>
+  <div class="sep"></div>
+  <button class="btn" id="fit" title="Fit graph to view">Fit</button>
+  <button class="btn" id="export" title="Save graph to a JSON file">Export</button>
+  <button class="btn" id="import" title="Load a graph from a JSON file">Import</button>
+  <input type="file" id="file" accept="application/json,.json" style="display:none">
+  <div class="sep"></div>
+  <span id="count"><b>0</b> articles</span>
+  <span id="dirty" title="Saved"></span>
+</div>
+
+<div id="hint"><div>
+  <b>Add a Wikipedia article</b> in the bar above to start your trail.
+</div></div>
+
+<div id="panel">
+  <div class="x" id="panelX">×</div>
+  <div class="head">
+    <div class="title" id="pTitle"></div>
+  </div>
+  <div class="body">
+    <div class="statline"><span class="stchip" id="pState"></span> <span class="meta" id="pDeg"></span></div>
+    <a class="link" id="pOpen" target="_blank" rel="noopener">↗ Open article in browser</a>
+    <div class="actions" id="pActions"></div>
+  </div>
+</div>
+
+<div id="legend">
+  <div class="hd" id="legHd"><h4 style="margin:0">Legend &amp; Controls</h4><span id="legTog" style="color:var(--muted)">▾</span></div>
+  <div class="body">
+    <div class="row"><span class="dot" style="background:var(--unread)"></span> Unread</div>
+    <div class="row"><span class="dot" style="background:var(--read)"></span> Read</div>
+    <div class="row"><span class="dot" style="background:var(--temp)"></span> Preview</div>
+    <div class="keys">
+      <span class="k"><kbd>Click</kbd></span><span>Info &amp; settings</span>
+      <span class="k"><kbd>Double-click</kbd></span><span>Keep preview</span>
+      <span class="k"><kbd>Right-click</kbd></span><span>Toggle read</span>
+      <span class="k"><kbd>Shift</kbd> + <kbd>Click</kbd></span><span>Expand related</span>
+      <span class="k"><kbd>Ctrl</kbd> + <kbd>Click</kbd></span><span>Open in browser</span>
+    </div>
+  </div>
+</div>
+
+<div id="list">
+  <div class="hd" id="listHd">
+    <h4>Articles</h4>
+    <span class="cnt" id="listCnt"></span>
+    <span class="tog" id="listTog">▾</span>
+  </div>
+  <div class="body">
+    <div class="search">
+      <input id="lq" placeholder="Filter articles…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="items" id="listItems"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+/* ----------------------------- config ----------------------------- */
+const DEFAULT_HOST = "en.wikipedia.org";
+const TEMP_CAP = 300;    // max preview (temporary) nodes shown per expansion
+const DRAG_THRESH = 4;   // px before a press counts as a drag
+
+/* ----------------------------- state ------------------------------ */
+const nodes = new Map();   // id -> node
+const edges = new Map();   // edgeId -> {a,b,preview}
+let activeOwnerId = null;  // node whose preview set is currently rendered (else hidden)
+let selectedId = null;
+let dirty = false;
+
+/* permanent node: {id,host,title,url,read,preview:false,owner:null,fixed,x,y,vx,vy,leadLinks:[]}
+   preview node:   bound to one owner; id = "prev|"+ownerId+"|"+host|title; preview:true, owner:<id>
+   Previews are stored permanently but only render while their owner === activeOwnerId. */
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const qEl = document.getElementById("q");
+let W=0,H=0,DPR=1;
+const view = {tx:0, ty:0, scale:1};
+let alpha = 0;
+
+/* ----------------------- theme (light/dark) ----------------------- */
+// canvas colors live in CSS vars so they follow prefers-color-scheme;
+// we cache them here and refresh whenever the OS/browser theme changes.
+const theme = {};
+function readTheme(){
+  const s = getComputedStyle(document.documentElement);
+  const g = k => s.getPropertyValue(k).trim();
+  theme.unread=g("--unread"); theme.read=g("--read"); theme.temp=g("--temp");
+  theme.edge=g("--edge"); theme.edgePrev=g("--edge-prev");
+  theme.prevRing=g("--node-prev-ring");
+  theme.hoverRing=g("--node-hover-ring"); theme.selRing=g("--node-sel-ring");
+  theme.labelHalo=g("--label-halo"); theme.labelText=g("--label-text");
+  theme.labelPrevText=g("--label-prev-text");
+  theme.chip={
+    prev:[g("--chip-prev-bg"),g("--chip-prev-text")],
+    read:[g("--chip-read-bg"),g("--chip-read-text")],
+    unread:[g("--chip-unread-bg"),g("--chip-unread-text")],
+  };
+}
+readTheme();
+const themeMQ = matchMedia("(prefers-color-scheme: light)");
+const onThemeChange = ()=>{ readTheme(); if(selectedId){ const n=nodes.get(selectedId); if(n && panel.style.display==="block") fillPanel(n); } };
+themeMQ.addEventListener ? themeMQ.addEventListener("change",onThemeChange)
+                        : themeMQ.addListener(onThemeChange);   // older Safari
+
+/* ----------------------------- helpers ---------------------------- */
+const nid = (host,title)=> host + "|" + title;
+const wikiUrl = (host,title)=> "https://"+host+"/wiki/"+encodeURIComponent(title.replace(/ /g,"_"));
+const previewId = (owner,host,title)=> "prev|"+owner+"|"+nid(host,title);
+const permNodes = ()=> [...nodes.values()].filter(n=>!n.preview);
+function isPermanent(id){ const n=nodes.get(id); return !!n && !n.preview; }
+function isVisible(n){ return !n.preview || n.owner===activeOwnerId; }
+function degreeOf(n){ let d=0; for(const e of edges.values()) if(!e.preview && (e.a===n.id||e.b===n.id)) d++; return d; }
+
+function parseInput(s){
+  s = s.trim();
+  if(!s) return null;
+  const m = s.match(/^(?:https?:\/\/)?([a-z0-9-]+\.wikipedia\.org)\/wiki\/([^?#]+)/i);
+  if(m){
+    let t = decodeURIComponent(m[2]).replace(/_/g," ").trim();
+    return {host:m[1].toLowerCase(), title:t};
+  }
+  return {host:DEFAULT_HOST, title:s.replace(/_/g," ")};
+}
+
+/* ----------------------------- API -------------------------------- */
+async function apiGet(host, params){
+  const u = new URL("https://"+host+"/w/api.php");
+  u.searchParams.set("format","json");
+  u.searchParams.set("origin","*");
+  for(const k in params) u.searchParams.set(k, params[k]);
+  const r = await fetch(u.toString());
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+
+// confirm existence + canonical title + url
+async function wikiInfo(host, title){
+  const res = await apiGet(host, {action:"query", titles:title, redirects:1,
+    prop:"info", inprop:"url"});
+  const pages = res.query && res.query.pages;
+  if(!pages) return null;
+  const p = pages[Object.keys(pages)[0]];
+  if(!p || p.missing !== undefined || p.invalid !== undefined) return null;
+  return {title:p.title, url:p.fullurl || wikiUrl(host,p.title), host};
+}
+
+// links mentioned in the lead/summary (first section) — the relatedness heuristic
+async function wikiLeadLinks(host, title){
+  let res;
+  try{
+    res = await apiGet(host, {action:"parse", page:title, prop:"text",
+      section:0, redirects:1, disablelimitreport:1});
+  }catch(e){ return []; }
+  if(!res.parse || !res.parse.text) return [];
+  const html = res.parse.text["*"];
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const out = [], seen = new Set();
+  doc.querySelectorAll("p a[href^='/wiki/']").forEach(a=>{
+    const href = a.getAttribute("href");
+    let t = href.slice(6);                 // strip "/wiki/"
+    t = t.split("#")[0].split("?")[0];
+    t = decodeURIComponent(t).replace(/_/g," ").trim();
+    if(!t || t.includes(":")) return;      // skip namespaces (File:, Help:, …)
+    if(t.toLowerCase() === title.toLowerCase()) return;
+    if(!seen.has(t)){ seen.add(t); out.push(t); }
+  });
+  return out;
+}
+
+/* --------------------------- graph mutation ----------------------- */
+function addEdge(a,b,preview){
+  if(a===b) return;
+  const id = a<b ? a+" "+b : b+" "+a;
+  if(!edges.has(id)) edges.set(id,{a,b,preview:!!preview});
+}
+function removeEdgesOf(id){
+  for(const [k,e] of edges) if(e.a===id||e.b===id) edges.delete(k);
+}
+
+// add/refresh heuristic edges between `node` and all permanent nodes
+function computeEdges(node){
+  for(const other of nodes.values()){
+    if(other===node || other.preview) continue;
+    if(other.host !== node.host) continue;
+    const a = node.leadLinks.includes(other.title);
+    const b = other.leadLinks.includes(node.title);
+    if(a||b) addEdge(node.id, other.id, false);
+  }
+}
+
+function spawnPos(near){
+  const a = Math.random()*Math.PI*2, r = 40+Math.random()*40;
+  if(near) return {x:near.x+Math.cos(a)*r, y:near.y+Math.sin(a)*r};
+  // spawn near current view centre, in world coords
+  const wx = (W/2 - view.tx)/view.scale, wy = (H/2 - view.ty)/view.scale;
+  return {x:wx+Math.cos(a)*r, y:wy+Math.sin(a)*r};
+}
+
+function makeNode(host,title,url,opts){
+  opts = opts||{};
+  const id = opts.preview ? previewId(opts.owner,host,title) : nid(host,title);
+  const p = spawnPos(opts.near);
+  const n = {id,host,title,url:url||wikiUrl(host,title),read:false,
+    preview:!!opts.preview, owner:opts.owner||null, fixed:false,
+    x:p.x, y:p.y, vx:0, vy:0, leadLinks: opts.leadLinks||[]};
+  nodes.set(id,n);
+  return n;
+}
+
+// add (or return existing) a permanent node, wiring up heuristic edges
+function addPermanent(host,title,url,opts){
+  opts = opts||{};
+  const id = nid(host,title);
+  const existing = nodes.get(id);
+  if(existing && !existing.preview) return existing;
+  const n = makeNode(host,title,url,{near:opts.near, leadLinks:opts.leadLinks});
+  // this article is now permanent — drop any preview copies of it (under any owner)
+  for(const [pid,m] of nodes){
+    if(m!==n && m.preview && nid(m.host,m.title)===id){ removeEdgesOf(pid); nodes.delete(pid); }
+  }
+  computeEdges(n);
+  if(!opts.leadLinks && !opts.noHydrate) hydrateLead(n);   // fetch lead links in background
+  markDirty(); reheat();
+  return n;
+}
+
+// turn a preview node into a permanent one, keeping its position
+function promotePreview(p){
+  const x=p.x, y=p.y;
+  const perm = addPermanent(p.host, p.title, p.url, {noHydrate:true});
+  perm.x=x; perm.y=y; perm.vx=perm.vy=0;
+  return perm;
+}
+
+// background fetch of a node's lead links, then re-wire its edges
+async function hydrateLead(n){
+  try{
+    const lead = await wikiLeadLinks(n.host, n.title);
+    if(!nodes.has(n.id)) return;
+    n.leadLinks = lead;
+    computeEdges(n);   // wires edges in both directions, including nodes whose lead mentions this one
+    reheat();
+  }catch(e){}
+}
+
+function deleteNode(n){
+  removeEdgesOf(n.id);
+  nodes.delete(n.id);
+  for(const [id,m] of nodes)               // also remove previews this node owned
+    if(m.preview && m.owner===n.id){ removeEdgesOf(id); nodes.delete(id); }
+  if(activeOwnerId===n.id) activeOwnerId=null;
+  if(selectedId===n.id){ selectedId=null; closePanel(); }
+  markDirty(); reheat();
+}
+
+function toggleRead(n){ n.read=!n.read; markDirty(); if(selectedId===n.id) fillPanel(n); renderList(); }
+
+/* --------------------------- high-level actions ------------------- */
+async function addFromBar(){
+  const parsed = parseInput(qEl.value);
+  if(!parsed) return;
+  setBusy(true);
+  try{
+    const info = await wikiInfo(parsed.host, parsed.title);
+    if(!info){ toast("Page not found: “"+parsed.title+"”", true); return; }
+    const id = nid(info.host, info.title);
+    const exist = nodes.get(id);
+    if(exist && !exist.preview){
+      selectedId = id; activeOwnerId = id; centerOn(exist); openPanel(exist);
+      toast("Already in your trail — jumping to it");
+      qEl.value=""; return;
+    }
+    const lead = await wikiLeadLinks(info.host, info.title);
+    const n = addPermanent(info.host, info.title, info.url, {leadLinks:lead});
+    // build this node's persistent preview set and show it
+    const shown = buildPreviews(n, lead);
+    activeOwnerId = n.id;
+    centerOn(n); selectedId=n.id; openPanel(n); reheat();
+    qEl.value="";
+    closeSugg();
+    toast("Added “"+info.title+"” · "+shown+" related shown");
+  }catch(e){
+    toast("Network error — check your connection", true);
+  }finally{ setBusy(false); refreshCount(); }
+}
+
+// reconcile a node's persistent preview set against its current lead links:
+// keep matching previews (positions preserved), drop stale ones, add missing ones
+function buildPreviews(source, lead){
+  const want = new Set(lead);
+  for(const [id,n] of nodes){
+    if(n.preview && n.owner===source.id && !want.has(n.title)){ removeEdgesOf(id); nodes.delete(id); }
+  }
+  let shown=0;
+  for(const t of lead){
+    if(shown>=TEMP_CAP) break;
+    if(isPermanent(nid(source.host,t))) continue;   // already permanent → heuristic edge covers it
+    const pid = previewId(source.id, source.host, t);
+    if(!nodes.has(pid)){
+      const n = makeNode(source.host, t, null, {preview:true, owner:source.id, near:source});
+      addEdge(source.id, n.id, true);
+    }
+    shown++;
+  }
+  reheat();
+  return shown;
+}
+
+// fetch a node's lead links, wire heuristic edges, (re)build its previews, and show them
+async function expandLead(source){
+  const lead = await wikiLeadLinks(source.host, source.title);
+  if(!nodes.has(source.id)) return 0;
+  source.leadLinks = lead;
+  computeEdges(source);
+  const shown = buildPreviews(source, lead);
+  activeOwnerId = source.id; markDirty();
+  return shown;
+}
+
+// shift-click handler: promote first if it was a preview, then expand its summary
+async function shiftClickExpand(node){
+  setBusy(true);
+  try{
+    const src = node.preview ? promotePreview(node) : node;
+    const shown = await expandLead(src);
+    selectedId = src.id; refreshCount();
+    toast("Showing "+shown+" related article"+(shown===1?"":"s"));
+  }catch(e){
+    toast("Couldn't expand this article", true);
+  }finally{ setBusy(false); }
+}
+
+// turn a preview into a permanent node and reveal its own previews
+// (double-click a preview, or its panel's "Add to trail")
+async function promoteAndExpand(p){
+  if(!p.preview) return;
+  setBusy(true);
+  try{
+    const perm = promotePreview(p);
+    selectedId = perm.id;
+    await expandLead(perm);
+    if(panel.style.display==="block") fillPanel(perm);
+    refreshCount();
+    toast("Kept “"+perm.title+"”");
+  }catch(e){
+    toast("Couldn't add this article", true);
+  }finally{ setBusy(false); }
+}
+
+/* ----------------------------- view ------------------------------- */
+function centerOn(n){
+  view.tx = W/2 - n.x*view.scale;
+  view.ty = H/2 - n.y*view.scale;
+}
+function fitView(){
+  const ns=[...nodes.values()].filter(isVisible);
+  if(!ns.length){ view.tx=W/2; view.ty=H/2; view.scale=1; return; }
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  for(const n of ns){ minx=Math.min(minx,n.x);miny=Math.min(miny,n.y);
+    maxx=Math.max(maxx,n.x);maxy=Math.max(maxy,n.y); }
+  const w=Math.max(1,maxx-minx), h=Math.max(1,maxy-miny), pad=120;
+  view.scale = Math.min(2.2, Math.max(.15, Math.min((W-pad)/w,(H-pad)/h)));
+  view.tx = W/2 - (minx+w/2)*view.scale;
+  view.ty = H/2 - (miny+h/2)*view.scale;
+}
+
+/* --------------------------- simulation --------------------------- */
+function reheat(){ alpha = Math.max(alpha, 0.7); }
+function step(){
+  const arr=[...nodes.values()].filter(isVisible), n=arr.length;   // hidden previews are parked
+  for(const a of arr){ a._fx=0; a._fy=0; }
+  // repulsion
+  for(let i=0;i<n;i++){
+    const a=arr[i];
+    for(let j=i+1;j<n;j++){
+      const b=arr[j];
+      let dx=a.x-b.x, dy=a.y-b.y, d2=dx*dx+dy*dy;
+      if(d2<0.01){ dx=(Math.random()-.5); dy=(Math.random()-.5); d2=dx*dx+dy*dy+0.01; }
+      const d=Math.sqrt(d2), f=9000/d2;
+      const fx=dx/d*f, fy=dy/d*f;
+      a._fx+=fx; a._fy+=fy; b._fx-=fx; b._fy-=fy;
+    }
+  }
+  // springs
+  for(const e of edges.values()){
+    const a=nodes.get(e.a), b=nodes.get(e.b); if(!a||!b||!isVisible(a)||!isVisible(b)) continue;
+    let dx=b.x-a.x, dy=b.y-a.y, d=Math.sqrt(dx*dx+dy*dy)||0.01;
+    const f=0.03*(d-95), fx=dx/d*f, fy=dy/d*f;
+    a._fx+=fx; a._fy+=fy; b._fx-=fx; b._fy-=fy;
+  }
+  // gravity to centre + integrate
+  for(const a of arr){
+    a._fx += -a.x*0.003; a._fy += -a.y*0.003;
+    if(a.fixed || a===dragNode) continue;
+    a.vx=(a.vx + a._fx*alpha)*0.85;
+    a.vy=(a.vy + a._fy*alpha)*0.85;
+    a.x+=a.vx; a.y+=a.vy;
+  }
+  alpha *= 0.985;
+  if(alpha<0.01) alpha=0;
+}
+
+/* ----------------------------- render ----------------------------- */
+let hoverId=null;
+function color(n){
+  if(n.preview) return theme.temp;
+  return n.read ? theme.read : theme.unread;
+}
+function radiusOf(n){
+  if(n.preview) return 8;
+  return 8 + Math.min(8, Math.sqrt(degreeOf(n))*2.2);
+}
+function render(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  const sc=view.scale;
+  // edges
+  ctx.lineWidth=1;
+  for(const e of edges.values()){
+    const a=nodes.get(e.a), b=nodes.get(e.b); if(!a||!b||!isVisible(a)||!isVisible(b)) continue;
+    const ax=a.x*sc+view.tx, ay=a.y*sc+view.ty, bx=b.x*sc+view.tx, by=b.y*sc+view.ty;
+    if(e.preview){ ctx.strokeStyle=theme.edgePrev; ctx.setLineDash([4,4]); }
+    else{ ctx.strokeStyle=theme.edge; ctx.setLineDash([]); }
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  const showLabels = sc>0.45;
+  // nodes
+  for(const n of nodes.values()){
+    if(!isVisible(n)) continue;
+    const x=n.x*sc+view.tx, y=n.y*sc+view.ty, r=radiusOf(n);
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle=color(n); ctx.fill();
+    if(n.id===hoverId){ ctx.strokeStyle=theme.hoverRing; ctx.lineWidth=2; ctx.stroke(); }
+    if(n.id===selectedId){ ctx.beginPath(); ctx.arc(x,y,r+4,0,Math.PI*2);
+      ctx.strokeStyle=theme.selRing; ctx.lineWidth=2; ctx.stroke(); }
+    if(showLabels || n.id===hoverId || n.id===selectedId){
+      const label = n.title.length>42 ? n.title.slice(0,40)+"…" : n.title;
+      ctx.font="12px system-ui,Segoe UI,sans-serif";
+      ctx.textAlign="center"; ctx.textBaseline="top";
+      ctx.lineWidth=3; ctx.strokeStyle=theme.labelHalo;
+      ctx.strokeText(label, x, y+r+3);
+      ctx.fillStyle = n.preview ? theme.labelPrevText : theme.labelText;
+      ctx.fillText(label, x, y+r+3);
+    }
+  }
+}
+function frame(){
+  if(alpha>0 || dragNode) step();
+  render();
+  requestAnimationFrame(frame);
+}
+
+/* --------------------------- hit testing -------------------------- */
+function nodeAt(sx,sy){
+  let best=null,bd=1e9;
+  for(const n of nodes.values()){
+    if(!isVisible(n)) continue;
+    const x=n.x*view.scale+view.tx, y=n.y*view.scale+view.ty;
+    const r=radiusOf(n)+4, dx=sx-x, dy=sy-y, d=dx*dx+dy*dy;
+    if(d<=r*r && d<bd){ bd=d; best=n; }
+  }
+  return best;
+}
+
+/* --------------------------- interaction -------------------------- */
+let down=null, moved=false, dragNode=null, panning=false, lastClick={id:null,t:0};
+
+cv.addEventListener("mousedown",e=>{
+  if(e.button!==0) return;
+  down={x:e.clientX,y:e.clientY}; moved=false;
+  const n=nodeAt(e.clientX,e.clientY);
+  if(n){ dragNode=n; n.fixed=false; }
+  else { panning=true; cv.classList.add("grabbing"); }
+});
+window.addEventListener("mousemove",e=>{
+  hoverId = (dragNode||panning)? hoverId : (nodeAt(e.clientX,e.clientY)||{}).id||null;
+  if(!down) return;
+  const dx=e.clientX-down.x, dy=e.clientY-down.y;
+  if(!moved && Math.hypot(dx,dy)>DRAG_THRESH) moved=true;
+  if(!moved) return;
+  if(dragNode){
+    dragNode.x=(e.clientX-view.tx)/view.scale;
+    dragNode.y=(e.clientY-view.ty)/view.scale;
+    dragNode.vx=dragNode.vy=0; reheat();
+  } else if(panning){
+    view.tx+=e.movementX; view.ty+=e.movementY;
+  }
+});
+window.addEventListener("mouseup",e=>{
+  cv.classList.remove("grabbing");
+  if(down && !moved && e.button===0){
+    const n=nodeAt(e.clientX,e.clientY);
+    onClick(n,e);
+  } else if(dragNode && moved){
+    dragNode.fixed=true; markDirty();    // pin where you dropped it
+  }
+  down=null; dragNode=null; panning=false;
+});
+
+function onClick(n,e){
+  if(!n){ activeOwnerId=null; closePanel(); selectedId=null; lastClick={id:null,t:0}; renderList(); return; }
+  if(e.shiftKey){ shiftClickExpand(n); return; }
+  if(e.ctrlKey||e.metaKey){ window.open(n.url,"_blank","noopener"); return; }
+  const t=performance.now();
+  const dbl = (n.id===lastClick.id && t-lastClick.t<350);
+  lastClick={id:n.id, t};
+  if(dbl){ if(n.preview) promoteAndExpand(n); return; }   // double-click a preview to keep it
+  // plain single left click
+  if(n.preview){ selectedId=n.id; openPanel(n); }   // owner stays active; siblings keep showing
+  else { selectedId=n.id; activeOwnerId=n.id; openPanel(n); reheat(); }  // show this node's previews
+  renderList();
+}
+
+cv.addEventListener("contextmenu",e=>{
+  e.preventDefault();
+  const n=nodeAt(e.clientX,e.clientY);
+  if(n && !n.preview) toggleRead(n);
+});
+
+cv.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const f = e.deltaY<0 ? 1.12 : 1/1.12;
+  const ns = Math.min(4, Math.max(0.1, view.scale*f));
+  const wx=(e.clientX-view.tx)/view.scale, wy=(e.clientY-view.ty)/view.scale;
+  view.scale=ns;
+  view.tx=e.clientX-wx*ns; view.ty=e.clientY-wy*ns;
+},{passive:false});
+
+/* ----------------------------- panel ------------------------------ */
+const panel=document.getElementById("panel");
+function openPanel(n){ fillPanel(n); panel.style.display="block"; }
+function closePanel(){ panel.style.display="none"; }
+function fillPanel(n){
+  document.getElementById("pTitle").textContent=n.title;
+  const owner = n.owner && nodes.get(n.owner);
+  const chip=document.getElementById("pState");
+  const ch = n.preview ? theme.chip.prev : n.read ? theme.chip.read : theme.chip.unread;
+  chip.textContent = n.preview ? "Preview" : n.read ? "Read" : "Unread";
+  chip.style.background = ch[0]; chip.style.color = ch[1];
+  const meta=document.getElementById("pDeg");
+  if(n.preview){
+    meta.textContent = owner ? "suggested from "+owner.title : "";
+  } else {
+    const deg=degreeOf(n);
+    let pv=0; for(const m of nodes.values()) if(m.preview && m.owner===n.id) pv++;
+    meta.textContent = deg+" connection"+(deg===1?"":"s")+(pv?" · "+pv+" preview"+(pv===1?"":"s"):"");
+  }
+  document.getElementById("pOpen").href=n.url;
+  const act=document.getElementById("pActions"); act.innerHTML="";
+  if(n.preview){
+    btn(act,"Add to trail",()=>promoteAndExpand(n)).className="primary";
+  } else {
+    btn(act, n.read?"Mark unread":"Mark read", ()=>toggleRead(n));
+    const d=btn(act,"Delete",()=>{ deleteNode(n); refreshCount(); }); d.className="danger";
+  }
+}
+function btn(parent,label,fn){ const b=document.createElement("button"); b.textContent=label;
+  b.onclick=fn; parent.appendChild(b); return b; }
+document.getElementById("panelX").onclick=()=>{ closePanel(); selectedId=null; renderList(); };
+
+/* --------------------------- export / import ---------------------- */
+function serialize(){
+  return {
+    app:"WikiTrail", version:2, defaultHost:DEFAULT_HOST,
+    nodes:[...nodes.values()].map(n=>({
+      id:n.id,host:n.host,title:n.title,url:n.url,read:n.read,
+      preview:n.preview,owner:n.owner,fixed:n.fixed,
+      x:Math.round(n.x),y:Math.round(n.y),leadLinks:n.leadLinks})),
+    edges:[...edges.values()].map(e=>({a:e.a,b:e.b,preview:e.preview}))
+  };
+}
+function doExport(){
+  const data=JSON.stringify(serialize(),null,1);
+  const blob=new Blob([data],{type:"application/json"});
+  const a=document.createElement("a");
+  const d=new Date(), pad=x=>String(x).padStart(2,"0");
+  a.download="wikitrail-"+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+".json";
+  a.href=URL.createObjectURL(blob); a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  dirty=false; updateDirty();
+  toast("Exported "+permNodes().length+" articles");
+}
+function doImport(text){
+  let data; try{ data=JSON.parse(text); }catch(e){ toast("Invalid file",true); return; }
+  if(!data || !Array.isArray(data.nodes)){ toast("Not a WikiTrail file",true); return; }
+  nodes.clear(); edges.clear(); selectedId=null; activeOwnerId=null; closePanel();
+  for(const n of data.nodes){
+    nodes.set(n.id,{id:n.id,host:n.host,title:n.title,url:n.url||wikiUrl(n.host,n.title),
+      read:!!n.read,preview:!!n.preview,owner:n.owner||null,fixed:!!n.fixed,
+      x:n.x||0,y:n.y||0,vx:0,vy:0,leadLinks:n.leadLinks||[]});
+  }
+  for(const e of (data.edges||[])) if(nodes.has(e.a)&&nodes.has(e.b)) addEdge(e.a,e.b,e.preview);
+  dirty=false; updateDirty(); refreshCount(); fitView(); reheat();
+  toast("Loaded "+permNodes().length+" articles");
+}
+
+/* ----------------------------- ui glue ---------------------------- */
+function markDirty(){ if(!dirty){ dirty=true; updateDirty(); } }
+function updateDirty(){ const d=document.getElementById("dirty");
+  d.classList.toggle("unsaved", dirty); d.title = dirty?"Unsaved changes":"Saved"; }
+function refreshCount(){
+  const perm=permNodes().length;
+  document.getElementById("count").innerHTML="<b>"+perm+"</b> article"+(perm===1?"":"s");
+  document.getElementById("hint").style.display = perm? "none":"flex";
+  renderList();
+}
+let toastT;
+function toast(msg,err){
+  const t=document.getElementById("toast");
+  t.textContent=msg; t.className=err?"err":""; t.style.display="block";
+  clearTimeout(toastT); toastT=setTimeout(()=>t.style.display="none", err?4000:2200);
+}
+function setBusy(b){ document.getElementById("spin").style.display=b?"block":"none"; }
+
+document.getElementById("add").onclick=addFromBar;
+qEl.addEventListener("keydown",e=>{
+  if(e.key==="ArrowDown"){ e.preventDefault(); moveSugg(1); return; }
+  if(e.key==="ArrowUp"){ e.preventDefault(); moveSugg(-1); return; }
+  if(e.key==="Escape"){ if(sugItems.length){ e.stopPropagation(); closeSugg(); } return; }
+  if(e.key==="Enter"){ if(sugActive>=0){ chooseSugg(sugActive); } else { addFromBar(); } }
+});
+document.getElementById("fit").onclick=fitView;
+document.getElementById("export").onclick=doExport;
+document.getElementById("import").onclick=()=>document.getElementById("file").click();
+document.getElementById("file").addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader(); r.onload=()=>doImport(r.result); r.readAsText(f);
+  e.target.value="";
+});
+window.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){ activeOwnerId=null; closePanel(); selectedId=null; renderList(); }
+});
+
+// autocomplete suggestions (custom dropdown, left-aligned with the field)
+let sugT, sugItems=[], sugActive=-1;
+const sugBox=document.getElementById("sugg");
+
+function closeSugg(){ sugBox.classList.remove("open"); sugBox.innerHTML=""; sugItems=[]; sugActive=-1; }
+function renderSugg(){
+  sugBox.innerHTML="";
+  sugItems.forEach((t,i)=>{
+    const o=document.createElement("div");
+    o.className="opt"+(i===sugActive?" active":""); o.textContent=t;
+    o.addEventListener("mousedown",ev=>{ ev.preventDefault(); chooseSugg(i); });
+    sugBox.appendChild(o);
+  });
+  sugBox.classList.toggle("open", sugItems.length>0);
+}
+function chooseSugg(i){
+  if(i<0||i>=sugItems.length) return;
+  qEl.value=sugItems[i];
+  closeSugg(); addFromBar();
+}
+function moveSugg(d){
+  if(!sugItems.length) return;
+  sugActive=(sugActive+d+sugItems.length)%sugItems.length;
+  renderSugg();
+  const el=sugBox.children[sugActive]; if(el) el.scrollIntoView({block:"nearest"});
+}
+
+qEl.addEventListener("input",e=>{
+  const v=e.target.value.trim();
+  clearTimeout(sugT);
+  if(v.length<2 || /wikipedia\.org\/wiki\//i.test(v)){ closeSugg(); return; }
+  sugT=setTimeout(async()=>{
+    try{
+      const res=await apiGet(DEFAULT_HOST,{action:"opensearch",search:v,limit:8,namespace:0});
+      sugItems=res[1]||[]; sugActive=-1; renderSugg();
+    }catch(_){}
+  },180);
+});
+qEl.addEventListener("blur",()=>{ setTimeout(closeSugg,120); });
+
+/* --------------------------- article list ------------------------- */
+const listEl=document.getElementById("list");
+const listItemsEl=document.getElementById("listItems");
+let listFilter="";
+
+function renderList(){
+  const perm=permNodes();
+  listEl.style.display = perm.length ? "block" : "none";
+  if(!perm.length){ listItemsEl.innerHTML=""; document.getElementById("listCnt").textContent=""; return; }
+  const unread=perm.filter(n=>!n.read).length;
+  document.getElementById("listCnt").textContent=unread+" unread · "+(perm.length-unread)+" read";
+  const f=listFilter.trim().toLowerCase();
+  let items = f ? perm.filter(n=>n.title.toLowerCase().includes(f)) : perm;
+  items=items.slice().sort((a,b)=> (a.read-b.read) || a.title.localeCompare(b.title)); // unread first, then A–Z
+  listItemsEl.innerHTML="";
+  if(!items.length){
+    const e=document.createElement("div"); e.className="empty"; e.textContent="No matches";
+    listItemsEl.appendChild(e); return;
+  }
+  for(const n of items){
+    const row=document.createElement("div");
+    row.className="item"+(n.id===selectedId?" sel":"");
+    row.title=n.title;
+    const dot=document.createElement("span");
+    dot.className="dot"; dot.style.background=n.read?"var(--read)":"var(--unread)";
+    const t=document.createElement("span"); t.className="t"; t.textContent=n.title;
+    row.appendChild(dot); row.appendChild(t);
+    row.addEventListener("click",()=>selectFromList(n.id));
+    listItemsEl.appendChild(row);
+  }
+}
+
+// clicking a list row selects & focuses that node in the graph
+function selectFromList(id){
+  const n=nodes.get(id); if(!n) return;
+  selectedId=id; activeOwnerId=id; centerOn(n); openPanel(n); reheat(); renderList();
+}
+
+document.getElementById("lq").addEventListener("input",e=>{ listFilter=e.target.value; renderList(); });
+// collapsible upward — folds the body up into the header (anchored top-left)
+document.getElementById("listHd").onclick=()=>{
+  listEl.classList.toggle("collapsed");
+  document.getElementById("listTog").textContent=listEl.classList.contains("collapsed")?"▸":"▾";
+};
+
+// legend collapse
+document.getElementById("legHd").onclick=()=>{
+  const l=document.getElementById("legend"); l.classList.toggle("collapsed");
+  document.getElementById("legTog").textContent=l.classList.contains("collapsed")?"▸":"▾";
+};
+
+window.addEventListener("beforeunload",e=>{
+  if(dirty && nodes.size){ e.preventDefault(); e.returnValue=""; }
+});
+
+function resize(){
+  DPR=window.devicePixelRatio||1;
+  W=window.innerWidth; H=window.innerHeight;
+  cv.width=W*DPR; cv.height=H*DPR;
+}
+window.addEventListener("resize",resize);
+
+/* ----------------------------- boot ------------------------------- */
+resize();
+view.tx=W/2; view.ty=H/2;
+refreshCount(); updateDirty();
+requestAnimationFrame(frame);
+qEl.focus();
+})();
+</script>
+</body>
+</html>
