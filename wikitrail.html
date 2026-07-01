@@ -245,6 +245,7 @@ const edges = new Map();   // edgeId -> {a,b,preview}
 let activeOwnerId = null;  // node whose preview set is currently rendered (else hidden)
 let selectedId = null;
 let dirty = false;
+let importSeq = 0;         // bumped on each import; guards the async redirect reconcile
 
 /* permanent node: {id,host,title,url,read,preview:false,owner:null,fixed,x,y,vx,vy,leadLinks:[]}
    preview node:   bound to one owner; id = "prev|"+ownerId+"|"+host|title; preview:true, owner:<id>
@@ -324,6 +325,31 @@ async function wikiInfo(host, title){
   return {title:p.title, url:p.fullurl || wikiUrl(host,p.title), host};
 }
 
+// resolve raw link titles to their canonical (post-redirect) titles.
+// returns Map(rawTitle -> canonicalTitle); anything unresolved maps to itself.
+async function resolveRedirects(host, titles){
+  const map = new Map();
+  const uniq = [...new Set(titles)];
+  for(let i=0;i<uniq.length;i+=50){          // API caps titles at 50 per query
+    const batch = uniq.slice(i,i+50);
+    let res;
+    try{
+      res = await apiGet(host, {action:"query", titles:batch.join("|"), redirects:1});
+    }catch(e){ for(const t of batch) map.set(t,t); continue; }  // leave batch as identity
+    const q = res.query || {};
+    // one from→to hop table covering both title normalization and redirects
+    const hop = new Map();
+    for(const r of (q.normalized||[])) hop.set(r.from, r.to);
+    for(const r of (q.redirects||[]))  hop.set(r.from, r.to);
+    for(const raw of batch){
+      let t = raw, guard = 0;
+      while(hop.has(t) && guard++ < 10) t = hop.get(t);   // follow chain (guarded)
+      map.set(raw, t);
+    }
+  }
+  return map;
+}
+
 // links mentioned in the lead/summary (first section) — the relatedness heuristic
 async function wikiLeadLinks(host, title){
   let res;
@@ -344,7 +370,16 @@ async function wikiLeadLinks(host, title){
     if(t.toLowerCase() === title.toLowerCase()) return;
     if(!seen.has(t)){ seen.add(t); out.push(t); }
   });
-  return out;
+  // fold redirects onto their canonical target so links land on the real node,
+  // then re-dedupe (two raw links can collapse to one canonical title)
+  const rmap = await resolveRedirects(host, out);
+  const canon = [], seen2 = new Set();
+  for(const raw of out){
+    const t = rmap.get(raw) || raw;
+    if(t.toLowerCase() === title.toLowerCase()) continue;   // self-link via redirect
+    if(!seen2.has(t)){ seen2.add(t); canon.push(t); }
+  }
+  return canon;
 }
 
 /* --------------------------- graph mutation ----------------------- */
@@ -773,6 +808,54 @@ function doImport(text){
   for(const e of (data.edges||[])) if(nodes.has(e.a)&&nodes.has(e.b)) addEdge(e.a,e.b,e.preview);
   dirty=false; updateDirty(); refreshCount(); fitView(); reheat();
   toast("Loaded "+permNodes().length+" articles");
+  reconcileImportRedirects(++importSeq);   // fold in redirects that predate this fix
+}
+
+// Older exports store pre-redirect link titles, so redirect-linked articles don't
+// connect. Re-resolve every node's leadLinks to canonical, then rebuild edges/previews.
+async function reconcileImportRedirects(seq){
+  const perms = permNodes();
+  if(!perms.length) return;
+  // resolve every distinct leadLink title, grouped by host (one lookup table per host)
+  const byHost = new Map();
+  for(const n of perms){
+    for(const t of (n.leadLinks||[])){
+      let s = byHost.get(n.host); if(!s){ s=new Set(); byHost.set(n.host,s); }
+      s.add(t);
+    }
+  }
+  const maps = new Map();
+  for(const [host,set] of byHost){
+    const m = await resolveRedirects(host, [...set]);
+    if(seq !== importSeq) return;              // a newer import superseded us
+    maps.set(host, m);
+  }
+  // canonicalize each node's leadLinks (re-dedupe; drop self-references)
+  let changed = false;
+  for(const n of perms){
+    if(!nodes.has(n.id)) continue;
+    const rmap = maps.get(n.host); if(!rmap) continue;
+    const canon=[], seen=new Set();
+    for(const raw of (n.leadLinks||[])){
+      const t = rmap.get(raw) || raw;
+      if(t !== raw) changed = true;
+      if(t.toLowerCase() === n.title.toLowerCase()) continue;
+      if(!seen.has(t)){ seen.add(t); canon.push(t); }
+    }
+    n.leadLinks = canon;
+  }
+  if(!changed) return;                         // nothing was a redirect — leave graph as saved
+  // rebuild permanent edges from the canonical links
+  for(const [k,e] of edges) if(!e.preview) edges.delete(k);
+  for(const n of perms) if(nodes.has(n.id)) computeEdges(n);
+  // rebuild each owner's preview set so stale pre-redirect previews are dropped/renamed
+  const owners = new Set();
+  for(const m of nodes.values()) if(m.preview && m.owner) owners.add(m.owner);
+  for(const oid of owners){
+    const o = nodes.get(oid);
+    if(o && !o.preview) buildPreviews(o, o.leadLinks);
+  }
+  reheat(); renderList();
 }
 
 /* ----------------------------- ui glue ---------------------------- */
