@@ -599,6 +599,12 @@ function seedPositions(){
 function reheat(){ alpha = Math.max(alpha, 0.7); }
 function step(){
   const arr=[...nodes.values()].filter(isVisible), n=arr.length;   // hidden previews are parked
+  // How hard previews push/pull the permanent graph back. Shared across the
+  // whole preview set and capped, so a 30-preview hub disturbs the layout about
+  // as much as a ~4-preview one (not 30x). Previews still feel the full force
+  // themselves, so they still spread into a tidy halo and avoid overlaps.
+  let prevCount=0; for(const a of arr) if(a.preview) prevCount++;
+  const PREV_BACK = Math.min(0.8, 3.2/Math.max(prevCount,1));
   for(const a of arr){ a._fx=0; a._fy=0; }
   // repulsion
   for(let i=0;i<n;i++){
@@ -608,25 +614,38 @@ function step(){
       let dx=a.x-b.x, dy=a.y-b.y, d2=dx*dx+dy*dy;
       if(d2<0.01){ dx=(Math.random()-.5); dy=(Math.random()-.5); d2=dx*dx+dy*dy+0.01; }
       const d=Math.sqrt(d2);
-      // A preview set springs only to its owner, so if the whole cloud repels
-      // the main graph at full strength it gets shoved to one side and drags
-      // the owner (and itself) far away from everything else. Damp repulsion
-      // between a preview and a permanent node so previews halo their owner
-      // instead of pushing the layout around; previews still repel each other.
-      const w = (a.preview!==b.preview) ? 0.15 : 1;
-      // floor the falloff distance so near-coincident nodes (e.g. a dense
-      // preview ring) can't produce an enormous 1/d² impulse and get flung away
-      const f=w*9000/Math.max(d2,144);
+      // Floor the falloff distance so near-coincident nodes (a dense preview
+      // ring, or the compact initial seed) can't produce an enormous 1/d²
+      // impulse and rocket off. This single guard removes the repulsion
+      // singularity that made nodes fly into the distance. The 1/d² falloff
+      // means easing this constant mostly loosens nearby pairs, so the graph
+      // clusters a bit tighter without changing its overall reach.
+      const f=6500/Math.max(d2,144);
       const fx=dx/d*f, fy=dy/d*f;
-      a._fx+=fx; a._fy+=fy; b._fx-=fx; b._fy-=fy;
+      // A permanent node feels only a faint, set-shared push from a preview
+      // (PREV_BACK) — and its own previews don't push it at all, so a focused
+      // node is never jostled by its halo. The preview always feels full force,
+      // so it still moves out of overlaps.
+      const aw = (!a.preview && b.preview) ? (a.id===b.owner ? 0 : PREV_BACK) : 1;
+      const bw = (!b.preview && a.preview) ? (b.id===a.owner ? 0 : PREV_BACK) : 1;
+      a._fx+=fx*aw; a._fy+=fy*aw; b._fx-=fx*bw; b._fy-=fy*bw;
     }
   }
   // springs
   for(const e of edges.values()){
     const a=nodes.get(e.a), b=nodes.get(e.b); if(!a||!b||!isVisible(a)||!isVisible(b)) continue;
     let dx=b.x-a.x, dy=b.y-a.y, d=Math.sqrt(dx*dx+dy*dy)||0.01;
-    const f=0.03*(d-95), fx=dx/d*f, fy=dy/d*f;
-    a._fx+=fx; a._fy+=fy; b._fx-=fx; b._fy-=fy;
+    const rest = e.preview ? 55 : 95;   // previews hug their owner more tightly
+    const f=0.03*(d-rest), fx=dx/d*f, fy=dy/d*f;
+    if(e.preview){
+      // A preview-edge pulls the preview fully toward its owner, but leaves the
+      // owner free — so after you drop a node it settles by its real links
+      // alone and the halo simply catches up, with no release jiggle.
+      if(a.preview){ a._fx+=fx; a._fy+=fy; }
+      else { b._fx-=fx; b._fy-=fy; }
+    } else {
+      a._fx+=fx; a._fy+=fy; b._fx-=fx; b._fy-=fy;
+    }
   }
   // gravity to centre + integrate
   for(const a of arr){
@@ -634,12 +653,6 @@ function step(){
     if(a===dragNode) continue;
     a.vx=(a.vx + a._fx*alpha)*0.85;
     a.vy=(a.vy + a._fy*alpha)*0.85;
-    // Cap per-frame movement. The integrator amplifies a sustained force into
-    // ~4x its velocity, so a large *summed* force — a dense preview cloud, or
-    // previews parked far from a freshly-selected owner all pulling at once —
-    // can rocket a node off screen. This cooling cap bounds every step.
-    const sp=Math.hypot(a.vx,a.vy), MAX_STEP=50;
-    if(sp>MAX_STEP){ const k=MAX_STEP/sp; a.vx*=k; a.vy*=k; }
     a.x+=a.vx; a.y+=a.vy;
   }
   alpha *= 0.985;
