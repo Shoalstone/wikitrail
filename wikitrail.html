@@ -635,7 +635,7 @@ function step(){
   for(const e of edges.values()){
     const a=nodes.get(e.a), b=nodes.get(e.b); if(!a||!b||!isVisible(a)||!isVisible(b)) continue;
     let dx=b.x-a.x, dy=b.y-a.y, d=Math.sqrt(dx*dx+dy*dy)||0.01;
-    const rest = e.preview ? 55 : 95;   // previews hug their owner more tightly
+    const rest = e.preview ? 55 : 75;   // previews hug their owner; linked nodes sit closer too
     const f=0.03*(d-rest), fx=dx/d*f, fy=dy/d*f;
     if(e.preview){
       // A preview-edge pulls the preview fully toward its owner, but leaves the
@@ -669,6 +669,10 @@ function radiusOf(n){
   if(n.preview) return 8;
   return 8 + Math.min(8, Math.sqrt(degreeOf(n))*2.2);
 }
+// Nodes are drawn at a fixed pixel size regardless of zoom; nudge that so they
+// grow a touch when zoomed in and shrink when zoomed out — but sub-linearly
+// (pow<1) and clamped, so they never balloon or vanish. 1.0 at scale 1.
+function zoomSizeFactor(){ return Math.min(1.7, Math.max(0.65, Math.pow(view.scale,0.4))); }
 function render(){
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.clearRect(0,0,W,H);
@@ -683,11 +687,11 @@ function render(){
     ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
   }
   ctx.setLineDash([]);
-  const showLabels = sc>0.45;
+  const showLabels = sc>0.45, nsz=zoomSizeFactor();
   // nodes
   for(const n of nodes.values()){
     if(!isVisible(n)) continue;
-    const x=n.x*sc+view.tx, y=n.y*sc+view.ty, r=radiusOf(n);
+    const x=n.x*sc+view.tx, y=n.y*sc+view.ty, r=radiusOf(n)*nsz;
     ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
     ctx.fillStyle=color(n); ctx.fill();
     if(n.id===hoverId){ ctx.strokeStyle=theme.hoverRing; ctx.lineWidth=2; ctx.stroke(); }
@@ -716,7 +720,7 @@ function nodeAt(sx,sy){
   for(const n of nodes.values()){
     if(!isVisible(n)) continue;
     const x=n.x*view.scale+view.tx, y=n.y*view.scale+view.ty;
-    const r=radiusOf(n)+4, dx=sx-x, dy=sy-y, d=dx*dx+dy*dy;
+    const r=radiusOf(n)*zoomSizeFactor()+4, dx=sx-x, dy=sy-y, d=dx*dx+dy*dy;
     if(d<=r*r && d<bd){ bd=d; best=n; }
   }
   return best;
